@@ -536,6 +536,7 @@ export default function App() {
               <img
                 src={selectedPattern.imageUrl}
                 alt={`${selectedPattern.name} 參考圖`}
+                referrerPolicy="no-referrer"
                 className="w-full h-auto rounded-xl object-contain max-h-[600px] mx-auto"
                 onError={(e) => { e.target.style.display = 'none'; }}
               />
