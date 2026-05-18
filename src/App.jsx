@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Tldraw, AssetRecordType, createShapeId, getHashForString, loadSnapshot } from 'tldraw';
+import 'tldraw/tldraw.css';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   Rocket, Mountain, Ship, Sprout, Bug, HardHat,
   Wind, RollerCoaster, Car, HeartHandshake, CalendarClock,
@@ -8,7 +11,7 @@ import {
   Anchor, AlertTriangle, Droplets, Feather, Share2, Wrench, Briefcase, Building,
   MapPin, Flame, ShieldAlert, Battery, Octagon, Flag, Search, Maximize,
   MessageSquare, Target, Activity, Calendar, Coffee, Package, Lightbulb,
-  FileText, Beaker, ArrowLeft, ArrowUp, Hash
+  FileText, Beaker, ArrowLeft, ArrowUp, Hash, Link, PanelLeftClose, PanelLeftOpen, ClipboardPaste
 } from 'lucide-react';
 
 // 新增：通用底層標籤的顏色樣式對照表
@@ -276,11 +279,76 @@ const quizOptions = [
   }
 ];
 
+// ── Sprint 自動計算（基準：Sprint 56，2026-05-18，每兩週一個）──────────────
+const SPRINT_BASE = { number: 56, start: new Date('2026-05-18') };
+function getCurrentSprintInfo() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysDiff = Math.floor((today - SPRINT_BASE.start) / (1000 * 60 * 60 * 24));
+  const sprintOffset = Math.max(0, Math.floor(daysDiff / 14));
+  const sprintNumber = SPRINT_BASE.number + sprintOffset;
+  const startDate = new Date(SPRINT_BASE.start);
+  startDate.setDate(startDate.getDate() + sprintOffset * 14);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 13);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return { sprintNumber, startDate: fmt(startDate), endDate: fmt(endDate) };
+}
+
+// ── Debrief utilities ────────────────────────────────────────────────────────
+function extractPlainText(richText) {
+  if (!richText) return '';
+  const texts = [];
+  const traverse = (node) => {
+    if (node?.type === 'text' && node.text) texts.push(node.text);
+    if (node?.content) node.content.forEach(traverse);
+  };
+  traverse(richText);
+  return texts.join('');
+}
+
+function extractNotesFromSnapshot(snapshot) {
+  // 相容兩種格式：TLEditorSnapshot ({document: {store}}) 和 TLStoreSnapshot ({store})
+  const store = snapshot?.document?.store || snapshot?.store || {};
+  return Object.values(store)
+    .filter(r => r.typeName === 'shape' && r.type === 'note')
+    .map(r => ({ id: r.id, text: (extractPlainText(r.props?.richText) || r.props?.text || '').trim() }))
+    .filter(n => n.text.length > 0);
+}
+
 export default function App() {
-  const [view, setView] = useState('home'); // 'home', 'quiz', 'result', 'all', 'detail'
+  const [view, setView] = useState('home'); // 'home', 'quiz', 'result', 'all', 'detail', 'board', 'history', 'debrief'
+  const [sprintNumber, setSprintNumber] = useState('');
+  const [sprintStartDate, setSprintStartDate] = useState('');
+  const [sprintEndDate, setSprintEndDate] = useState('');
+  const [savedMsg, setSavedMsg] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessionToRestore, setSessionToRestore] = useState(null);
+  const editorRef = useRef(null);
+  const currentSessionIdRef = useRef(null);
+  const autoSaveTimerRef = useRef(null);
   const [recommendedIds, setRecommendedIds] = useState([]);
   const [selectedOptions, setSelectedOptions] = useState([]);
   const [selectedPattern, setSelectedPattern] = useState(null); // 新增：追蹤目前查看詳細內容的 pattern
+
+  // Bulk import state
+  const [bulkText, setBulkText] = useState('');
+  const [showBulkInput, setShowBulkInput] = useState(false);
+
+  // Debrief state
+  const [debriefSession, setDebriefSession] = useState(null);
+  const [debriefNotes, setDebriefNotes] = useState([]); // [{id, text, areaIndex}]
+  const [debriefLoading, setDebriefLoading] = useState(false);
+  const [debriefError, setDebriefError] = useState('');
+  const [debriefApiKey, setDebriefApiKey] = useState(() => localStorage.getItem('retro-api-key') || '');
+  const [reassignTarget, setReassignTarget] = useState(null); // noteId being reassigned
+  const autoCategFiredRef = useRef(false);
+  const [debriefActionItems, setDebriefActionItems] = useState([]); // [{id, text, done}]
+  const [debriefActionInput, setDebriefActionInput] = useState('');
+  const [pendingLinkNoteId, setPendingLinkNoteId] = useState(null);
+  const actionItemInputRef = useRef(null);
+  const [debriefSuggestions, setDebriefSuggestions] = useState('');
+  const [debriefSuggestionsLoading, setDebriefSuggestionsLoading] = useState(false);
 
   // 新增：開始測驗並重置選取狀態
   const startQuiz = () => {
@@ -503,13 +571,30 @@ export default function App() {
 
     return (
       <div className="max-w-5xl mx-auto py-8 px-4 animate-in fade-in duration-300">
-        <button
-          onClick={() => setView(recommendedIds.includes(selectedPattern.id) ? 'result' : 'all')}
-          className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium mb-6 transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          返回列表
-        </button>
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => setView(recommendedIds.includes(selectedPattern.id) ? 'result' : 'all')}
+            className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            返回列表
+          </button>
+          <button
+            onClick={() => {
+              const info = getCurrentSprintInfo();
+              setSprintNumber(String(info.sprintNumber));
+              setSprintStartDate(info.startDate);
+              setSprintEndDate(info.endDate);
+              setSessionToRestore(null);
+              currentSessionIdRef.current = null;
+              setView('board');
+            }}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors shadow-sm"
+          >
+            <Play className="w-4 h-4" />
+            使用模板
+          </button>
+        </div>
 
         <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 mb-8">
           <div className="flex items-center gap-4 mb-4">
@@ -588,6 +673,756 @@ export default function App() {
     );
   };
 
+  const handleBoardMount = useCallback((editor) => {
+    editorRef.current = editor;
+    if (sessionToRestore) {
+      currentSessionIdRef.current = sessionToRestore.id;
+      loadSnapshot(editor.store, sessionToRestore.snapshot);
+      setSessionToRestore(null);
+    } else {
+      currentSessionIdRef.current = crypto.randomUUID();
+    }
+    editor.store.listen(() => {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = setTimeout(() => autoSave(), 2000);
+    }, { scope: 'document' });
+    if (sessionToRestore || !selectedPattern?.imageUrl) return;
+    const url = selectedPattern.imageUrl;
+    const img = new window.Image();
+    img.onload = () => {
+      if (editor.getCurrentPageShapes().some(s => s.type === 'image')) return;
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const assetId = AssetRecordType.createId(getHashForString(url));
+      editor.createAssets([{
+        id: assetId,
+        typeName: 'asset',
+        type: 'image',
+        props: { name: selectedPattern.name, src: url, w, h, mimeType: 'image/jpeg', isAnimated: false },
+        meta: {},
+      }]);
+      const shapeId = createShapeId();
+      editor.createShapes([{ id: shapeId, type: 'image', x: 0, y: 0, props: { assetId, w, h } }]);
+    };
+    img.src = url;
+  }, [selectedPattern, sessionToRestore]);
+
+  const autoSave = useCallback(() => {
+    if (!editorRef.current || !selectedPattern) return;
+    const snapshot = editorRef.current.getSnapshot();
+    const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]');
+    const id = currentSessionIdRef.current;
+    const idx = sessions.findIndex(s => s.id === id);
+    const session = {
+      id: id || crypto.randomUUID(),
+      sprintNumber: sprintNumber || '?',
+      startDate: sprintStartDate,
+      endDate: sprintEndDate,
+      patternId: selectedPattern.id,
+      patternName: selectedPattern.name,
+      savedAt: new Date().toISOString(),
+      snapshot,
+      // 保留已有的分類結果，避免 autoSave 覆蓋
+      ...(idx >= 0 && sessions[idx].categorizedNotes
+        ? { categorizedNotes: sessions[idx].categorizedNotes }
+        : {}),
+    };
+    if (idx >= 0) sessions[idx] = session;
+    else sessions.push(session);
+    currentSessionIdRef.current = session.id;
+    localStorage.setItem('retro-sessions', JSON.stringify(sessions));
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 2000);
+  }, [sprintNumber, sprintStartDate, sprintEndDate, selectedPattern]);
+
+  // debriefNotes 任何變動都存回 localStorage（含手動調整）
+  useEffect(() => {
+    if (!debriefSession?.id || view !== 'debrief' || debriefNotes.length === 0) return;
+    const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]');
+    const idx = sessions.findIndex(s => s.id === debriefSession.id);
+    if (idx >= 0) {
+      sessions[idx].categorizedNotes = debriefNotes;
+      localStorage.setItem('retro-sessions', JSON.stringify(sessions));
+    }
+  }, [debriefNotes]);
+
+  // action items 變動時存回 localStorage
+  useEffect(() => {
+    if (!debriefSession?.id || view !== 'debrief') return;
+    const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]');
+    const idx = sessions.findIndex(s => s.id === debriefSession.id);
+    if (idx >= 0) { sessions[idx].actionItems = debriefActionItems; localStorage.setItem('retro-sessions', JSON.stringify(sessions)); }
+  }, [debriefActionItems]);
+
+  // 進復盤時若有 API Key 且尚未分類，自動觸發 AI 分類
+  useEffect(() => {
+    if (view !== 'debrief') return;
+    if (!debriefApiKey.trim()) return;
+    if (debriefNotes.length === 0) return;
+    if (autoCategFiredRef.current) return;
+    if (debriefNotes.some(n => n.areaIndex !== null)) return; // 已有分類結果，略過
+    autoCategFiredRef.current = true;
+    runClaudeCateg();
+  }, [view, debriefNotes.length]);
+
+  // 當 Sprint 欄位變動時也觸發儲存
+  useEffect(() => {
+    if (view === 'board' && editorRef.current && selectedPattern) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = setTimeout(() => autoSave(), 1000);
+    }
+  }, [sprintNumber, sprintStartDate, sprintEndDate]);
+
+  const [historyVersion, setHistoryVersion] = useState(0);
+
+  const deleteSession = (id) => {
+    const updated = JSON.parse(localStorage.getItem('retro-sessions') || '[]').filter(s => s.id !== id);
+    localStorage.setItem('retro-sessions', JSON.stringify(updated));
+    setHistoryVersion(v => v + 1);
+  };
+
+  const openSessionInBoard = (session) => {
+    const pattern = patternsData.find(p => p.id === session.patternId);
+    if (!pattern) return;
+    setSelectedPattern(pattern);
+    setSprintNumber(session.sprintNumber === '?' ? '' : String(session.sprintNumber));
+    setSprintStartDate(session.startDate || '');
+    setSprintEndDate(session.endDate || '');
+    setSessionToRestore(session);
+    setView('board');
+  };
+
+  const bulkImportNotes = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor || !bulkText.trim()) return;
+
+    const notes = bulkText
+      .split(/\n\s*\n/)
+      .map(n => n.trim())
+      .filter(n => n.length > 0);
+    if (notes.length === 0) return;
+
+    const NOTE_W = 220;
+    const NOTE_H = 220;
+    const COLS = 4;
+    const GAP = 16;
+    const START_X = 1400;
+    const START_Y = 80;
+
+    const shapes = notes.map((noteText, idx) => {
+      const col = idx % COLS;
+      const row = Math.floor(idx / COLS);
+      const paragraphs = noteText.split('\n').map(line =>
+        line.trim()
+          ? { type: 'paragraph', content: [{ type: 'text', text: line }] }
+          : { type: 'paragraph' }
+      );
+      return {
+        id: createShapeId(),
+        type: 'note',
+        x: START_X + col * (NOTE_W + GAP),
+        y: START_Y + row * (NOTE_H + GAP),
+        props: {
+          richText: { type: 'doc', content: paragraphs },
+          color: 'yellow',
+          size: 'm',
+          align: 'middle',
+          verticalAlign: 'middle',
+          growY: 0,
+          fontSizeAdjustment: 0,
+          url: '',
+        },
+      };
+    });
+
+    editor.createShapes(shapes);
+    setBulkText('');
+    setShowBulkInput(false);
+  }, [bulkText]);
+
+  const openDebrief = (session) => {
+    autoCategFiredRef.current = false;
+    if (session.categorizedNotes?.length > 0) {
+      setDebriefNotes(session.categorizedNotes);
+    } else {
+      const notes = extractNotesFromSnapshot(session.snapshot);
+      setDebriefNotes(notes.map(n => ({ ...n, areaIndex: null })));
+    }
+    setDebriefActionItems(session.actionItems || []);
+    setDebriefSuggestions(session.aiSuggestions || '');
+    setDebriefSession(session);
+    setDebriefError('');
+    setView('debrief');
+  };
+
+  const runClaudeCateg = async () => {
+    if (!debriefSession || !debriefApiKey.trim()) return;
+    const pattern = patternsData.find(p => p.id === debriefSession.patternId);
+    if (!pattern) return;
+    const rawNotes = debriefNotes.map(n => n.text);
+    if (rawNotes.length === 0) return;
+
+    setDebriefLoading(true);
+    setDebriefError('');
+    localStorage.setItem('retro-api-key', debriefApiKey.trim());
+
+    const areas = pattern.areas.map((a, i) => `${i}. ${a.name}：${a.desc}`).join('\n');
+    const noteList = rawNotes.map((t, i) => `[${i}] ${t}`).join('\n');
+
+    const prompt = `你是 Scrum Master 助理。以下是回顧會議的模板區塊定義：
+${areas}
+
+以下是團隊貼的便利貼（每行一張）：
+${noteList}
+
+請將每張便利貼分類到最適合的區塊。僅回傳 JSON 陣列，格式如下（不要其他文字）：
+[{"noteIndex": 0, "areaIndex": 1}, ...]
+所有 noteIndex 必須出現一次，areaIndex 為 0 到 ${pattern.areas.length - 1}。`;
+
+    try {
+      const client = new Anthropic({ apiKey: debriefApiKey.trim(), dangerouslyAllowBrowser: true });
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const raw = msg.content[0]?.text || '';
+      const jsonMatch = raw.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error('回應格式錯誤');
+      const result = JSON.parse(jsonMatch[0]);
+      const categorized = debriefNotes.map((n, idx) => {
+        const match = result.find(r => r.noteIndex === idx);
+        return match ? { ...n, areaIndex: match.areaIndex } : n;
+      });
+      setDebriefNotes(categorized);
+      // 存回 localStorage，下次進來直接顯示
+      const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]');
+      const idx = sessions.findIndex(s => s.id === debriefSession.id);
+      if (idx >= 0) {
+        sessions[idx].categorizedNotes = categorized;
+        localStorage.setItem('retro-sessions', JSON.stringify(sessions));
+      }
+    } catch (e) {
+      setDebriefError(e.message || '分析失敗，請確認 API Key 是否正確');
+    } finally {
+      setDebriefLoading(false);
+    }
+  };
+
+  const generateSuggestions = async (pattern) => {
+    if (!debriefApiKey.trim() || debriefSuggestionsLoading) return;
+    setDebriefSuggestionsLoading(true);
+    const areaBlocks = pattern.areas.map((a, i) => {
+      const notes = debriefNotes.filter(n => n.areaIndex === i).map(n => `- ${n.text}`).join('\n');
+      return `【${a.name}】\n${notes || '（無）'}`;
+    }).join('\n\n');
+    const unassigned = debriefNotes.filter(n => n.areaIndex === null);
+    const prompt = `你是資深 Scrum Master 顧問。以下是 Sprint ${debriefSession?.sprintNumber ?? ''} 回顧會議（${pattern.name}）的分類結果：
+
+${areaBlocks}
+${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}`).join('\n')}` : ''}
+
+請以繁體中文提供：
+1. **本次回顧摘要**（2-3 句，點出整體氛圍與主要收穫）
+2. **需優先處理的問題**（Top 3，每條一句，加上建議方向）
+3. **建議 Action Items**（3-5 條，格式：負責角色 → 具體行動）
+4. **下次回顧追蹤項目**（1-2 條）
+
+回覆格式使用 markdown，清晰簡潔。`;
+
+    try {
+      const client = new Anthropic({ apiKey: debriefApiKey.trim(), dangerouslyAllowBrowser: true });
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = msg.content[0]?.text || '';
+      setDebriefSuggestions(text);
+      // 存回 localStorage
+      const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]');
+      const idx = sessions.findIndex(s => s.id === debriefSession.id);
+      if (idx >= 0) { sessions[idx].aiSuggestions = text; localStorage.setItem('retro-sessions', JSON.stringify(sessions)); }
+    } catch (e) {
+      setDebriefSuggestions(`分析失敗：${e.message}`);
+    } finally {
+      setDebriefSuggestionsLoading(false);
+    }
+  };
+
+  const renderDebrief = () => {
+    if (!debriefSession) return null;
+    // patternId 可能因 JSON 序列化變成字串，統一用 == 比對
+    const pattern = patternsData.find(p => p.id == debriefSession.patternId);
+    if (!pattern) return (
+      <div className="max-w-4xl mx-auto py-16 px-4 text-center text-slate-400">
+        <p className="text-lg">找不到對應模板（patternId: {String(debriefSession.patternId)}）</p>
+        <button onClick={() => setView('history')} className="mt-4 text-blue-500 hover:underline">返回歷史紀錄</button>
+      </div>
+    );
+
+    const unassigned = debriefNotes.filter(n => n.areaIndex === null);
+    const hasNotes = debriefNotes.length > 0;
+
+    return (
+      <div className="max-w-6xl mx-auto py-8 px-4 animate-in fade-in duration-300">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-8 gap-4">
+          <div>
+            <button onClick={() => setView('history')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors mb-3 text-sm">
+              <ArrowLeft className="w-4 h-4" /> 返回歷史紀錄
+            </button>
+            <h2 className="text-3xl font-bold text-slate-800">復盤分析</h2>
+            <p className="text-slate-500 mt-1">
+              {pattern.name} · Sprint {debriefSession.sprintNumber}
+              {debriefSession.startDate && ` · ${debriefSession.startDate} → ${debriefSession.endDate || '?'}`}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            {/* API Key input */}
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                placeholder="Anthropic API Key"
+                value={debriefApiKey}
+                onChange={e => setDebriefApiKey(e.target.value)}
+                className="text-sm border border-slate-200 rounded-lg px-3 py-2 w-56 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+              />
+              <button
+                onClick={runClaudeCateg}
+                disabled={debriefLoading || !debriefApiKey.trim() || !hasNotes}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm"
+              >
+                {debriefLoading
+                  ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> 分析中</>
+                  : <><Lightbulb className="w-4 h-4" /> AI 自動分類</>}
+              </button>
+            </div>
+            {debriefError && <p className="text-xs text-red-500">{debriefError}</p>}
+          </div>
+        </div>
+
+        {!hasNotes && (
+          <div className="text-center py-24 text-slate-400">
+            <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p className="text-lg">這份紀錄沒有便利貼</p>
+            <p className="text-sm mt-1">請回到白板新增便利貼後再儲存</p>
+          </div>
+        )}
+
+        {hasNotes && (() => {
+          const linkedNoteIds = new Set([
+            ...debriefActionItems.flatMap(i => i.linkedNoteIds || []),
+            ...(pendingLinkNoteId ? [pendingLinkNoteId] : []),
+          ]);
+          const toggleNoteAction = (note) => {
+            if (debriefActionItems.flatMap(i => i.linkedNoteIds || []).includes(note.id)) {
+              setDebriefActionItems(prev => prev
+                .map(i => ({ ...i, linkedNoteIds: (i.linkedNoteIds || []).filter(id => id !== note.id) }))
+                .filter(i => (i.linkedNoteIds || []).length > 0 || i.text)
+              );
+              if (pendingLinkNoteId === note.id) setPendingLinkNoteId(null);
+            } else if (pendingLinkNoteId === note.id) {
+              setPendingLinkNoteId(null);
+            } else {
+              setPendingLinkNoteId(note.id);
+              setDebriefActionInput('');
+              setTimeout(() => {
+                actionItemInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => actionItemInputRef.current?.focus(), 300);
+              }, 50);
+            }
+          };
+          return (
+          <>
+            {/* Unassigned notes pool */}
+            {unassigned.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                  未分類便利貼（{unassigned.length} 張）
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {unassigned.map(note => (
+                    <NoteChip
+                      key={note.id}
+                      note={note}
+                      areas={pattern.areas}
+                      reassignTarget={reassignTarget}
+                      setReassignTarget={setReassignTarget}
+                      isLinked={linkedNoteIds.has(note.id)}
+                      onAddToAction={() => toggleNoteAction(note)}
+                      onAssign={(areaIndex) => {
+                        setDebriefNotes(prev => prev.map(n => n.id === note.id ? { ...n, areaIndex } : n));
+                        setReassignTarget(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Copy + Import row */}
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <ManualImport
+                  debriefNotes={debriefNotes}
+                  areas={pattern.areas}
+                  onApply={(mapping) => {
+                    setDebriefNotes(prev => prev.map((n, idx) => {
+                      const a = mapping[idx];
+                      return a !== undefined ? { ...n, areaIndex: a === -1 ? null : a } : n;
+                    }));
+                  }}
+                />
+              </div>
+              <button
+                onClick={() => navigator.clipboard.writeText(
+                  debriefNotes.map((n, i) => `[${i}] ${n.text}`).join('\n\n')
+                )}
+                className="flex-shrink-0 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Hash className="w-3.5 h-3.5" /> 複製（含編號）
+              </button>
+            </div>
+
+            {/* Area columns */}
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+              {pattern.areas.map((area, aIdx) => {
+                const areaNotesArr = debriefNotes.filter(n => n.areaIndex === aIdx);
+                return (
+                  <div key={aIdx} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    <div className={`px-4 py-3 flex items-center gap-2 border-b border-slate-100 ${area.colorBg.split(' ')[0]}`}>
+                      <div className={`p-1.5 rounded-lg ${area.colorBg}`}>
+                        {React.cloneElement(area.icon, { className: 'w-4 h-4' })}
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-800 text-sm">{area.name}</p>
+                        {area.commonTags && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {area.commonTags.map(tag => (
+                              <span key={tag} className={`text-xs font-bold px-1.5 py-0 rounded border ${getTagStyle(tag)}`}>{tag}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <span className="ml-auto text-xs font-bold text-slate-400 bg-white rounded-full px-2 py-0.5 border border-slate-200">{areaNotesArr.length}</span>
+                    </div>
+                    <div className="p-3 grid grid-cols-3 gap-2 min-h-[80px]">
+                      {areaNotesArr.map(note => (
+                        <NoteChip
+                          key={note.id}
+                          note={note}
+                          areas={pattern.areas}
+                          reassignTarget={reassignTarget}
+                          setReassignTarget={setReassignTarget}
+                          isLinked={linkedNoteIds.has(note.id)}
+                          onAddToAction={() => toggleNoteAction(note)}
+                          onAssign={(newAreaIndex) => {
+                            setDebriefNotes(prev => prev.map(n => n.id === note.id ? { ...n, areaIndex: newAreaIndex === 'unassign' ? null : newAreaIndex } : n));
+                            setReassignTarget(null);
+                          }}
+                          currentAreaIndex={aIdx}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Action Items */}
+            <div className="mt-10">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" /> Action Items
+              </h3>
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-2">
+                {debriefActionItems.map(item => (
+                  <ActionItemRow
+                    key={item.id}
+                    item={item}
+                    allNotes={debriefNotes}
+                    onChange={updated => setDebriefActionItems(prev => prev.map(i => i.id === item.id ? updated : i))}
+                    onDelete={() => setDebriefActionItems(prev => prev.filter(i => i.id !== item.id))}
+                  />
+                ))}
+                <div className="flex gap-2 pt-2">
+                  <input
+                    ref={actionItemInputRef}
+                    value={debriefActionInput}
+                    onChange={e => setDebriefActionInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && debriefActionInput.trim()) {
+                        setDebriefActionItems(prev => [...prev, { id: crypto.randomUUID(), text: debriefActionInput.trim(), done: false, linkedNoteIds: pendingLinkNoteId ? [pendingLinkNoteId] : [] }]);
+                        setDebriefActionInput('');
+                        setPendingLinkNoteId(null);
+                      }
+                    }}
+                    placeholder={pendingLinkNoteId ? '輸入對應的 action item…' : '新增 action item… (Enter 送出)'}
+                    className={`flex-1 text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 bg-white ${pendingLinkNoteId ? 'border-emerald-400 focus:ring-emerald-300' : 'border-slate-200 focus:ring-emerald-300'}`}
+                  />
+                  <button
+                    onClick={() => {
+                      if (!debriefActionInput.trim()) return;
+                      setDebriefActionItems(prev => [...prev, { id: crypto.randomUUID(), text: debriefActionInput.trim(), done: false, linkedNoteIds: pendingLinkNoteId ? [pendingLinkNoteId] : [] }]);
+                      setDebriefActionInput('');
+                      setPendingLinkNoteId(null);
+                    }}
+                    className="text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg transition-colors"
+                  >新增</button>
+                </div>
+                {pendingLinkNoteId && (
+                  <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                    <span>✓</span> 新增後將自動連結選取的便利貼
+                    <button onClick={() => setPendingLinkNoteId(null)} className="ml-1 text-slate-400 hover:text-slate-600">取消</button>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* AI Suggestions */}
+            <div className="mt-8 mb-10">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5 text-amber-500" /> AI 建議
+                </h3>
+                <button
+                  onClick={() => generateSuggestions(pattern)}
+                  disabled={debriefSuggestionsLoading || !debriefApiKey.trim()}
+                  className="flex items-center gap-2 text-sm font-semibold text-amber-600 hover:bg-amber-50 disabled:opacity-40 border border-amber-200 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  {debriefSuggestionsLoading
+                    ? <><span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full" /> 分析中</>
+                    : debriefSuggestions ? '重新分析' : '開始分析'}
+                </button>
+              </div>
+              {debriefSuggestions ? (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 text-sm text-slate-700 leading-relaxed prose prose-sm max-w-none">
+                  {debriefSuggestions.split('\n').map((line, i) => {
+                    if (line.startsWith('## ') || line.startsWith('**') && line.endsWith('**')) {
+                      return <p key={i} className="font-bold text-slate-800 mt-3 mb-1">{line.replace(/\*\*/g, '').replace(/^## /, '')}</p>;
+                    }
+                    if (line.startsWith('- ') || line.startsWith('* ')) {
+                      return <p key={i} className="ml-3 before:content-['•'] before:mr-2 before:text-amber-400">{line.slice(2)}</p>;
+                    }
+                    if (line.trim() === '') return <br key={i} />;
+                    return <p key={i}>{line}</p>;
+                  })}
+                </div>
+              ) : (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-8 text-center text-slate-400">
+                  <Lightbulb className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">點「開始分析」，AI 將根據分類結果給出摘要與行動建議</p>
+                </div>
+              )}
+            </div>
+          </>
+          );
+        })()}
+      </div>
+    );
+  };
+
+  const renderHistory = () => {
+    const sessions = JSON.parse(localStorage.getItem('retro-sessions') || '[]')
+      .sort((a, b) => Number(b.sprintNumber) - Number(a.sprintNumber));
+    return (
+      <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in duration-300">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-3xl font-bold text-slate-800">歷史紀錄</h2>
+            <p className="text-slate-500 mt-1">共 {sessions.length} 筆 Sprint 回顧紀錄</p>
+          </div>
+          <button onClick={() => setView('home')} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors">
+            <ArrowLeft className="w-4 h-4" /> 返回首頁
+          </button>
+        </div>
+        {sessions.length === 0 ? (
+          <div className="text-center py-24 text-slate-400">
+            <p className="text-lg">還沒有儲存任何紀錄</p>
+            <p className="text-sm mt-2">開始使用模板白板後將自動記錄</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sessions.map(s => (
+              <div key={s.id} className="bg-white rounded-2xl border border-slate-200 p-6 flex items-center justify-between gap-4 hover:shadow-sm transition-shadow">
+                <div className="flex items-center gap-4">
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-center min-w-[72px]">
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-wider">Sprint</p>
+                    <p className="text-2xl font-black text-blue-600">{s.sprintNumber}</p>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800">{s.patternName}</p>
+                    {(s.startDate || s.endDate) && (
+                      <p className="text-sm text-slate-500 mt-0.5">{s.startDate} {s.endDate ? `→ ${s.endDate}` : ''}</p>
+                    )}
+                    <p className="text-xs text-slate-400 mt-1">儲存於 {new Date(s.savedAt).toLocaleString('zh-TW')}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openDebrief(s)}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-purple-600 hover:bg-purple-50 px-3 py-2 rounded-lg transition-colors border border-purple-200"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" /> 復盤
+                  </button>
+                  <button
+                    onClick={() => openSessionInBoard(s)}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:bg-blue-50 px-3 py-2 rounded-lg transition-colors border border-blue-200"
+                  >
+                    <Play className="w-3.5 h-3.5" /> 開啟白板
+                  </button>
+                  <button
+                    onClick={() => { if (confirm('確定要刪除這筆紀錄？')) deleteSession(s.id); }}
+                    className="text-sm font-semibold text-red-400 hover:bg-red-50 px-3 py-2 rounded-lg transition-colors border border-red-200"
+                  >
+                    刪除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBoard = () => {
+    if (!selectedPattern) return null;
+    return (
+      <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
+        {/* Left Sidebar */}
+        <div className={`flex-shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden transition-all duration-300 ${sidebarOpen ? 'w-80' : 'w-12'}`}>
+          <div className="p-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+            {sidebarOpen && (
+              <button
+                onClick={() => setView('detail')}
+                className="flex items-center gap-2 text-slate-500 hover:text-blue-600 font-medium transition-colors text-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回說明
+              </button>
+            )}
+            <button
+              onClick={() => setSidebarOpen(o => !o)}
+              className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors flex-shrink-0"
+              title={sidebarOpen ? '收合側欄' : '展開側欄'}
+            >
+              {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+            </button>
+          </div>
+          {sidebarOpen && (
+            <>
+              <div className="p-4 border-b border-slate-100 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-50 p-2.5 rounded-lg border border-blue-100 flex-shrink-0">
+                    {selectedPattern.icon}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">{selectedPattern.category}</p>
+                    <h2 className="text-base font-bold text-slate-800 leading-tight">{selectedPattern.name}</h2>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sprint Info */}
+              <div className="p-4 border-b border-slate-100 flex-shrink-0">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Sprint 資訊</p>
+                  <button
+                    onClick={() => { const i = getCurrentSprintInfo(); setSprintNumber(String(i.sprintNumber)); setSprintStartDate(i.startDate); setSprintEndDate(i.endDate); }}
+                    className="text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                  >自動填入</button>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-slate-500 mb-1 block">Sprint 編號</label>
+                    <input type="number" value={sprintNumber} onChange={e => setSprintNumber(e.target.value)} placeholder="42"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-xs text-slate-500 mb-1 block">開始</label>
+                      <input type="date" value={sprintStartDate} onChange={e => setSprintStartDate(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-slate-500 mb-1 block">結束</label>
+                      <input type="date" value={sprintEndDate} onChange={e => setSprintEndDate(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto flex-1 p-4">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">區塊說明</p>
+                <div className="space-y-3">
+                  {selectedPattern.areas.map((area, idx) => (
+                    <div key={idx} className="p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-white hover:border-slate-200 transition-colors">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className={`p-1.5 rounded-lg flex-shrink-0 ${area.colorBg}`}>
+                          {React.cloneElement(area.icon, { className: 'w-4 h-4' })}
+                        </div>
+                        <span className="font-bold text-slate-800 text-sm">{area.name}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 leading-relaxed mb-2">{area.desc}</p>
+                      {area.commonTags && (
+                        <div className="flex flex-wrap gap-1">
+                          {area.commonTags.map(tag => (
+                            <span key={tag} className={`text-xs font-bold px-2 py-0.5 rounded border ${getTagStyle(tag)}`}>{tag}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+
+
+              {/* Bulk import */}
+              <div className="p-3 border-t border-slate-100 flex-shrink-0">
+                <button
+                  onClick={() => setShowBulkInput(v => !v)}
+                  className="w-full flex items-center justify-between text-xs font-bold text-slate-500 hover:text-slate-700 transition-colors"
+                >
+                  <span className="flex items-center gap-1.5"><ClipboardPaste className="w-3.5 h-3.5" /> 批量貼上便利貼</span>
+                  <span>{showBulkInput ? '▼' : '▲'}</span>
+                </button>
+                {showBulkInput && (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      value={bulkText}
+                      onChange={e => setBulkText(e.target.value)}
+                      placeholder={"每則便利貼以空行分隔，例如：\n\n第一張便利貼內容\n\n第二張便利貼內容"}
+                      className="w-full text-xs border border-slate-200 rounded-lg px-2 py-2 h-36 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                    />
+                    <button
+                      onClick={bulkImportNotes}
+                      disabled={!bulkText.trim()}
+                      className="w-full text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white py-2 rounded-lg transition-colors"
+                    >
+                      貼上白板
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 border-t border-slate-100 flex-shrink-0 text-center">
+                <p className="text-xs text-slate-400">{savedMsg ? '✓ 已自動儲存' : '變更將自動儲存'}</p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Whiteboard */}
+        <div className="flex-1 relative">
+          <Tldraw onMount={handleBoardMount} />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       {/* Header */}
@@ -615,18 +1450,29 @@ export default function App() {
             >
               模式總覽
             </button>
+            <button
+              onClick={() => setView('history')}
+              className={`text-sm font-medium px-3 py-2 rounded-md transition-colors ${view === 'history' ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+            >
+              歷史紀錄
+            </button>
           </nav>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main>
-        {view === 'home' && renderHome()}
-        {view === 'quiz' && renderQuiz()}
-        {view === 'result' && renderResult()}
-        {view === 'all' && renderAll()}
-        {view === 'detail' && renderDetail()}
-      </main>
+      {view !== 'board' && (
+        <main>
+          {view === 'home' && renderHome()}
+          {view === 'quiz' && renderQuiz()}
+          {view === 'result' && renderResult()}
+          {view === 'all' && renderAll()}
+          {view === 'detail' && renderDetail()}
+          {view === 'history' && renderHistory()}
+          {view === 'debrief' && renderDebrief()}
+        </main>
+      )}
+      {view === 'board' && renderBoard()}
     </div>
   );
 }
@@ -679,6 +1525,293 @@ function PatternCard({ pattern, highlight = false, onSelect }) {
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+function MemoSquare({ note }) {
+  const ref = React.useRef(null);
+  const [show, setShow] = React.useState(false);
+  const [style, setStyle] = React.useState({});
+
+  const onEnter = () => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    setStyle({ position: 'fixed', bottom: window.innerHeight - rect.top + 6, left: rect.left, zIndex: 300 });
+    setShow(true);
+  };
+
+  return (
+    <div className="relative">
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={() => setShow(false)}
+        className="text-xs bg-yellow-100 border border-yellow-300 text-slate-700 p-1.5 rounded-sm w-[80px] h-[80px] overflow-hidden shadow-sm cursor-default"
+      >
+        <span className="line-clamp-4 break-words">{note.text}</span>
+      </div>
+      {show && (
+        <div style={style} className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 max-w-[240px] shadow-xl pointer-events-none whitespace-pre-wrap break-words">
+          {note.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionItemRow({ item, allNotes, onChange, onDelete }) {
+  const [showPicker, setShowPicker] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [editText, setEditText] = React.useState(item.text);
+  const inputRef = React.useRef(null);
+  const pickerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!showPicker) return;
+    const handler = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setShowPicker(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPicker]);
+  const linked = (item.linkedNoteIds || [])
+    .map(id => allNotes.find(n => n.id === id))
+    .filter(Boolean);
+
+  const toggleNote = (noteId) => {
+    const ids = item.linkedNoteIds || [];
+    onChange({ ...item, linkedNoteIds: ids.includes(noteId) ? ids.filter(i => i !== noteId) : [...ids, noteId] });
+  };
+
+  const commitEdit = () => {
+    const trimmed = editText.trim();
+    if (trimmed) onChange({ ...item, text: trimmed });
+    else setEditText(item.text);
+    setEditing(false);
+  };
+
+  React.useEffect(() => {
+    if (editing && inputRef.current) inputRef.current.focus();
+  }, [editing]);
+
+  return (
+    <div className="group space-y-1.5 py-1">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => onChange({ ...item, done: !item.done })}
+          className={`w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${item.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 hover:border-emerald-400'}`}
+        >
+          {item.done && <span className="text-xs">✓</span>}
+        </button>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={editText}
+            onChange={e => setEditText(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') { setEditText(item.text); setEditing(false); } }}
+            className="flex-1 text-sm border border-blue-300 rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+          />
+        ) : (
+          <span
+            onClick={() => { setEditText(item.text); setEditing(true); }}
+            className={`flex-1 text-sm cursor-text ${item.done ? 'line-through text-slate-400' : 'text-slate-700'}`}
+          >{item.text}</span>
+        )}
+        <button
+          onClick={() => setShowPicker(v => !v)}
+          className={`opacity-0 group-hover:opacity-100 text-xs px-1.5 py-0.5 rounded transition-all ${linked.length > 0 ? 'opacity-100 text-blue-400 hover:text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}
+          title="關聯便利貼"
+        >
+          <Link className="w-3.5 h-3.5 inline" /> {linked.length > 0 && <span>{linked.length}</span>}
+        </button>
+        <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-400 transition-all text-xs px-1">✕</button>
+      </div>
+
+      {/* 已關聯的便利貼 chips */}
+      {linked.length > 0 && (
+        <div className="ml-8 flex flex-wrap gap-2">
+          {linked.map(n => (
+            <MemoSquare key={n.id} note={n} />
+          ))}
+        </div>
+      )}
+
+      {/* 便利貼選取器 */}
+      {showPicker && (
+        <div ref={pickerRef} className="ml-8 bg-white border border-slate-200 rounded-xl shadow-lg p-3 space-y-1 max-h-48 overflow-y-auto">
+          <p className="text-xs font-bold text-slate-400 mb-2">選取相關便利貼</p>
+          {allNotes.map(n => {
+            const selected = (item.linkedNoteIds || []).includes(n.id);
+            return (
+              <button
+                key={n.id}
+                onClick={() => toggleNote(n.id)}
+                className={`w-full text-left text-xs px-2 py-1.5 rounded-lg flex items-start gap-2 transition-colors ${selected ? 'bg-yellow-50 border border-yellow-200' : 'hover:bg-slate-50'}`}
+              >
+                <span className={`mt-0.5 w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center ${selected ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300'}`}>
+                  {selected && '✓'}
+                </span>
+                <span className="line-clamp-2 text-slate-700">{n.text}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManualImport({ debriefNotes, areas, onApply }) {
+  const [open, setOpen] = React.useState(false);
+  const [text, setText] = React.useState('');
+  const [err, setErr] = React.useState('');
+
+  const apply = () => {
+    setErr('');
+    const mapping = {};
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const m = trimmed.match(/^(\d+)\s*[:：]\s*(-?\d+)$/);
+      if (!m) { setErr(`格式錯誤：「${trimmed}」，請用 noteIndex: areaIndex`); return; }
+      const ni = Number(m[1]), ai = Number(m[2]);
+      if (ni < 0 || ni >= debriefNotes.length) { setErr(`編號 ${ni} 超出範圍（0–${debriefNotes.length - 1}）`); return; }
+      if (ai !== -1 && (ai < 0 || ai >= areas.length)) { setErr(`區塊 ${ai} 超出範圍（0–${areas.length - 1}，-1 = 未分類）`); return; }
+      mapping[ni] = ai;
+    }
+    onApply(mapping);
+    setText('');
+    setOpen(false);
+  };
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+      >
+        <FileText className="w-3.5 h-3.5" /> 匯入分類結果
+      </button>
+      {open && (
+        <div className="mt-3 bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-1">區塊編號對照</p>
+            <div className="flex flex-wrap gap-1.5">
+              {areas.map((a, i) => (
+                <span key={i} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">{i} = {a.name}</span>
+              ))}
+              <span className="text-xs bg-slate-100 text-slate-400 px-2 py-0.5 rounded font-mono">-1 = 未分類</span>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-1">格式：每行 <code className="bg-slate-100 px-1 rounded">便利貼編號: 區塊編號</code></p>
+            <textarea
+              value={text}
+              onChange={e => { setText(e.target.value); setErr(''); }}
+              placeholder={"0: 2\n1: 0\n2: 3\n..."}
+              className="w-full text-xs font-mono border border-slate-200 rounded-lg px-3 py-2 h-32 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+            />
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+          <button
+            onClick={apply}
+            disabled={!text.trim()}
+            className="text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white px-4 py-1.5 rounded-lg transition-colors"
+          >套用</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoteChip({ note, areas, reassignTarget, setReassignTarget, onAssign, currentAreaIndex, isLinked, onAddToAction }) {
+  const isOpen = reassignTarget === note.id;
+  const btnRef = React.useRef(null);
+  const [popupStyle, setPopupStyle] = React.useState({});
+  const [showTooltip, setShowTooltip] = React.useState(false);
+  const [tooltipStyle, setTooltipStyle] = React.useState({});
+
+  const handleClick = () => {
+    if (!isOpen && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setPopupStyle(spaceBelow < 240
+        ? { position: 'fixed', bottom: window.innerHeight - rect.top + 4, left: rect.left, zIndex: 200 }
+        : { position: 'fixed', top: rect.bottom + 4, left: rect.left, zIndex: 200 }
+      );
+    }
+    setReassignTarget(isOpen ? null : note.id);
+  };
+
+  const handleMouseEnter = () => {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setTooltipStyle({ position: 'fixed', bottom: window.innerHeight - rect.top + 6, left: rect.left, zIndex: 300 });
+    setShowTooltip(true);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setShowTooltip(false)}
+        className={`text-left text-sm rounded-sm p-2 w-[110px] h-[110px] overflow-hidden shadow-sm transition-colors ${isLinked ? 'bg-emerald-100 border border-emerald-300 hover:border-emerald-500' : 'bg-yellow-100 border border-yellow-300 hover:border-yellow-500'}`}
+      >
+        {isLinked && <span className="mr-1 text-emerald-500 text-xs">✓</span>}
+        <span className="line-clamp-4 break-words">{note.text}</span>
+      </button>
+      {showTooltip && (
+        <div style={tooltipStyle} className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 max-w-[240px] shadow-xl pointer-events-none whitespace-pre-wrap break-words">
+          {note.text}
+        </div>
+      )}
+      {isOpen && (
+        <div style={popupStyle} className="bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 min-w-[180px]">
+          {onAddToAction && (
+            isLinked ? (
+              <button
+                onClick={() => { onAddToAction(); setReassignTarget(null); }}
+                className="w-full text-left text-xs px-3 py-2 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+              >
+                <span className="text-red-400">－</span> 從 Action Item 移除
+              </button>
+            ) : (
+              <button
+                onClick={() => { onAddToAction(); setReassignTarget(null); }}
+                className="w-full text-left text-xs px-3 py-2 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+              >
+                <span className="text-emerald-500">＋</span> 加到 Action Item
+              </button>
+            )
+          )}
+          {currentAreaIndex !== undefined && (
+            <button
+              onClick={() => onAssign('unassign')}
+              className="w-full text-left text-xs px-3 py-2 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2"
+            >
+              <span className="text-slate-400">↩</span> 移回未分類
+            </button>
+          )}
+          {(onAddToAction || currentAreaIndex !== undefined) && areas.some((_, i) => i !== currentAreaIndex) && (
+            <div className="my-1 border-t border-slate-100" />
+          )}
+          {areas.map((area, aIdx) => (
+            aIdx !== currentAreaIndex && (
+              <button
+                key={aIdx}
+                onClick={() => onAssign(aIdx)}
+                className="w-full text-left text-xs px-3 py-2 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                {area.name}
+              </button>
+            )
+          ))}
+        </div>
+      )}
     </div>
   );
 }
