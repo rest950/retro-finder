@@ -13,12 +13,15 @@ import {
 
 // 新增：通用底層標籤的顏色樣式對照表
 const getTagStyle = (tag) => {
-  if (tag.includes('慶祝')) return 'bg-amber-100 text-amber-700 border-amber-200';
+  if (tag.includes('值得分享') || tag.includes('慶祝')) return 'bg-amber-100 text-amber-700 border-amber-200';
   if (tag.includes('保持')) return 'bg-emerald-100 text-emerald-700 border-emerald-200';
   if (tag.includes('阻礙')) return 'bg-red-100 text-red-700 border-red-200';
   if (tag.includes('嘗試')) return 'bg-blue-100 text-blue-700 border-blue-200';
   if (tag.includes('風險') || tag.includes('疑惑')) return 'bg-orange-100 text-orange-700 border-orange-200';
   if (tag.includes('學習')) return 'bg-purple-100 text-purple-700 border-purple-200';
+  if (tag.includes('心路歷程')) return 'bg-slate-100 text-slate-600 border-slate-200';
+  if (tag.includes('需要改變')) return 'bg-indigo-100 text-indigo-700 border-indigo-200';
+  if (tag.includes('值得投資')) return 'bg-teal-100 text-teal-600 border-teal-200';
   return 'bg-slate-100 text-slate-700 border-slate-200';
 };
 
@@ -35,8 +38,8 @@ const patternsData = [
     scenario: "年輕團隊、剛成軍的團隊，或是 Sprint 壓力極大，需要可愛框架舒緩情緒時。",
     tags: ["新手友善", "輕鬆可愛", "舒緩壓力"],
     areas: [
-      { name: "太陽 (Ms. Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "回顧期間發生的好事！值得大家一起慶祝、或是進行得很順利的地方。", commonTags: ["#值得慶祝 (Good)"] },
-      { name: "小青蛙 (Mr. Frog)", icon: <Bug className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "遇到困難了嗎？寫下你需要團隊幫助、需要新工具或培訓的地方。", commonTags: ["#遇到阻礙 (Blocker)"] },
+      { name: "太陽 (Ms. Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "回顧期間發生的好事！值得大家一起慶祝、或是進行得很順利的地方。", commonTags: ["#值得分享 (Share)", "#心路歷程 (Reflect)"] },
+      { name: "小青蛙 (Mr. Frog)", icon: <Bug className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "遇到困難了嗎？寫下你需要團隊幫助、需要新工具或培訓的地方。", commonTags: ["#值得投資 (Invest)"] },
       { name: "沼澤 (The Swamp)", icon: <CloudRain className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-600", desc: "哪些事情讓你覺得深陷泥沼？寫下不清楚、難以克服或進展緩慢的任務。", commonTags: ["#遇到阻礙 (Blocker)", "#潛在風險 (Risk)"] },
       { name: "荷葉 (Lily Pads)", icon: <Leaf className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "我們的救生圈是什麼？寫下那些幫助我們保持穩定、需要繼續維持的好習慣。", commonTags: ["#繼續保持 (Keep)"] },
       { name: "青蛙卵 (Frog Eggs)", icon: <Circle className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "孵化新點子！建議團隊下個 Sprint 可以嘗試的新事物或開始做的事。", commonTags: ["#新嘗試 (Start)"] }
@@ -53,12 +56,12 @@ const patternsData = [
     scenario: "團隊正朝著明確的重大發布 (Release) 前進，或近期進度緩慢需找出瓶頸時。",
     tags: ["目標導向", "排除阻礙", "衝刺期"],
     areas: [
-      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "光明的時刻！分享專案中值得慶祝、進展順利的成就。", commonTags: ["#值得慶祝 (Good)"] },
+      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "光明的時刻！分享專案中值得慶祝、進展順利的成就。", commonTags: ["#值得分享 (Share)"] },
       { name: "攀登 (Climbing)", icon: <ArrowUp className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "我們正在努力往上爬的部分。寫下團隊穩步推進、需要繼續堅持的事情。", commonTags: ["#繼續保持 (Keep)"] },
       { name: "跌落 (Falling)", icon: <TrendingDown className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "失足的危險！需要注意的失誤、風險，或讓我們退步的原因。", commonTags: ["#潛在風險 (Risk)"] },
       { name: "指南針 (Compass)", icon: <Compass className="w-6 h-6"/>, colorBg: "bg-indigo-100 text-indigo-600", desc: "指引方向。我們接下來應該「開始做」哪些新嘗試來幫助攻頂？", commonTags: ["#新嘗試 (Start)"] },
       { name: "風暴 (Storm)", icon: <CloudLightning className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "遇到亂流了。寫下我們面臨的挑戰、模糊不清的需求或外部阻礙。", commonTags: ["#遇到阻礙 (Blocker)"] },
-      { name: "雜草 (Weeds)", icon: <Scissors className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-700", desc: "絆住腳步的東西。哪些是浪費時間的流程？我們應該「停止做」什麼？", commonTags: ["#遇到阻礙 (Stop)"] }
+      { name: "雜草 (Weeds)", icon: <Scissors className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-700", desc: "絆住腳步的東西。哪些是浪費時間的流程？我們應該「停止做」什麼？", commonTags: ["#需要改變 (Change)"] }
     ]
   },
   {
@@ -73,9 +76,9 @@ const patternsData = [
     tags: ["高度互動", "打破僵局", "角色扮演"],
     areas: [
       { name: "風 (Wind)", icon: <Wind className="w-6 h-6"/>, colorBg: "bg-sky-100 text-sky-600", desc: "推動我們揚帆的力量！什麼事情或誰正在激勵團隊、推動我們全速前進？", commonTags: ["#繼續保持 (Keep)"] },
-      { name: "錨 (Anchor)", icon: <Anchor className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "拖慢速度的重物。什麼事情阻礙了我們、把我們留在原地？", commonTags: ["#遇到阻礙 (Stop)"] },
+      { name: "錨 (Anchor)", icon: <Anchor className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "拖慢速度的重物。什麼事情阻礙了我們、把我們留在原地？", commonTags: ["#需要改變 (Change)"] },
       { name: "礁石 (Rocks)", icon: <AlertTriangle className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "前方的潛在危機！我們需要留意哪些即將到來的風險或技術坑？", commonTags: ["#潛在風險 (Risk)"] },
-      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "寶藏與高光時刻！分享進展得特別棒、閃閃發光的成就。", commonTags: ["#值得慶祝 (Good)"] },
+      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "寶藏與高光時刻！分享進展得特別棒、閃閃發光的成就。", commonTags: ["#值得分享 (Share)"] },
       { name: "船艦 (Ship)", icon: <Ship className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-800", desc: "我們的堅強後盾。是哪個流程、工具或夥伴讓團隊保持穩定和強大？", commonTags: ["#繼續保持 (Keep)"] }
     ]
   },
@@ -90,9 +93,9 @@ const patternsData = [
     scenario: "團隊經歷文化轉型、有新成員加入需培養默契，或需處理技術債時。",
     tags: ["心理安全", "團隊建立", "溫和溝通"],
     areas: [
-      { name: "花圃 (Garden)", icon: <Sprout className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "正在盛開的花朵！寫下團隊中成長良好、和諧且運作順利的部分。", commonTags: ["#繼續保持 (Keep)", "#值得慶祝 (Good)"] },
-      { name: "澆水罐 (Watering Can)", icon: <Droplets className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "需要更多滋潤的地方。哪些事情我們應該投入更多時間或資源？", commonTags: ["#新嘗試 (Start)"] },
-      { name: "剪刀 (Shears)", icon: <Scissors className="w-6 h-6"/>, colorBg: "bg-slate-100 text-slate-600", desc: "需要修剪的枝葉。我們應該減少做什麼？(例如：無效會議、過度設計)", commonTags: ["#遇到阻礙 (Stop)"] },
+      { name: "花圃 (Garden)", icon: <Sprout className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "正在盛開的花朵！寫下團隊中成長良好、和諧且運作順利的部分。", commonTags: ["#繼續保持 (Keep)", "#值得分享 (Share)"] },
+      { name: "澆水罐 (Watering Can)", icon: <Droplets className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "需要更多滋潤的地方。哪些事情我們應該投入更多時間或資源？", commonTags: ["#值得投資 (Invest)"] },
+      { name: "剪刀 (Shears)", icon: <Scissors className="w-6 h-6"/>, colorBg: "bg-slate-100 text-slate-600", desc: "需要修剪的枝葉。我們應該減少做什麼？(例如：無效會議、過度設計)", commonTags: ["#需要改變 (Change)"] },
       { name: "鳥巢 (Bird's Nest)", icon: <Feather className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-700", desc: "孕育新生命。團隊最近有什麼新發現，或者想嘗試什麼新方法？", commonTags: ["#學習發現 (Learn)", "#新嘗試 (Start)"] },
       { name: "病蟲害 (Disease)", icon: <Bug className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "啃食我們花園的害蟲。需要留心的系統漏洞、技術債或潛在風險。", commonTags: ["#潛在風險 (Risk)"] }
     ]
@@ -109,9 +112,9 @@ const patternsData = [
     tags: ["情緒宣洩", "簡單直覺", "趣味性"],
     areas: [
       { name: "蜘蛛網 (Web)", icon: <Share2 className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "被困住了！寫下這個 Sprint 中讓你覺得不喜歡、煩人或被絆住的事情。", commonTags: ["#遇到阻礙 (Blocker)"] },
-      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-500", desc: "溫暖的陽光！分享你熱愛、覺得做起來很有成就感的部分。", commonTags: ["#值得慶祝 (Good)"] },
+      { name: "太陽 (Sun)", icon: <Sun className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-500", desc: "溫暖的陽光！分享你熱愛、覺得做起來很有成就感的部分。", commonTags: ["#值得分享 (Share)"] },
       { name: "戴帽子的小花 (Top Hat Flower)", icon: <Sprout className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "奇妙的生長！哪些事情正在順利發展、或者團隊表現得特別好？", commonTags: ["#繼續保持 (Keep)"] },
-      { name: "花盆 (Flower Pots)", icon: <Briefcase className="w-6 h-6"/>, colorBg: "bg-orange-100 text-orange-700", desc: "換個盆子會更好。寫下你覺得可以改變作法、稍作改進的地方。", commonTags: ["#新嘗試 (Start)"] }
+      { name: "花盆 (Flower Pots)", icon: <Briefcase className="w-6 h-6"/>, colorBg: "bg-orange-100 text-orange-700", desc: "換個盆子會更好。寫下你覺得可以改變作法、稍作改進的地方。", commonTags: ["#需要改變 (Change)"] }
     ]
   },
   {
@@ -127,9 +130,9 @@ const patternsData = [
     areas: [
       { name: "藍圖 (Plans)", icon: <FileText className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "未來的設計圖。我們接下來應該嘗試的新作法，或是需要修改計畫的地方。", commonTags: ["#新嘗試 (Start)"] },
       { name: "工具箱 (Toolbox)", icon: <Wrench className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "鎖緊螺絲！哪些工具、技術或流程讓我們保持穩定、扎實地推進？", commonTags: ["#繼續保持 (Keep)"] },
-      { name: "便當盒 (Lunchbox)", icon: <Briefcase className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "補充體力！團隊需要更多什麼？(可能是更多溝通、更多測試時間、或下午茶)", commonTags: ["#新嘗試 (Start)"] },
+      { name: "便當盒 (Lunchbox)", icon: <Briefcase className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "補充體力！團隊需要更多什麼？(可能是更多溝通、更多測試時間、或下午茶)", commonTags: ["#值得投資 (Invest)"] },
       { name: "三角錐 (Cone)", icon: <AlertTriangle className="w-6 h-6"/>, colorBg: "bg-orange-100 text-orange-600", desc: "施工危險請繞道。我們需要特別注意、小心避開的坑或風險在哪裡？", commonTags: ["#潛在風險 (Risk)"] },
-      { name: "吊車與建築 (Building & Crane)", icon: <Building className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "順利建成的部分。大聲肯定那些運作良好、成功蓋好的功能或模組！", commonTags: ["#值得慶祝 (Good)"] }
+      { name: "吊車與建築 (Building & Crane)", icon: <Building className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "順利建成的部分。大聲肯定那些運作良好、成功蓋好的功能或模組！", commonTags: ["#值得分享 (Share)"] }
     ]
   },
   {
@@ -144,9 +147,9 @@ const patternsData = [
     tags: ["大局觀", "動力檢視", "願景"],
     areas: [
       { name: "飛鳥 (Birds)", icon: <Feather className="w-6 h-6"/>, colorBg: "bg-sky-100 text-sky-500", desc: "乘風而起的動力！什麼人事物是我們翅膀下的風，激勵著我們向上？", commonTags: ["#繼續保持 (Keep)"] },
-      { name: "熱氣球 (Hot Air Balloon)", icon: <Wind className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-500", desc: "升空的美景。分享團隊的成功、成就與令人興奮的里程碑。", commonTags: ["#值得慶祝 (Good)"] },
+      { name: "熱氣球 (Hot Air Balloon)", icon: <Wind className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-500", desc: "升空的美景。分享團隊的成功、成就與令人興奮的里程碑。", commonTags: ["#值得分享 (Share)"] },
       { name: "暴風雲 (Storm Clouds)", icon: <CloudLightning className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-700", desc: "惡劣天氣。這個 Sprint 中哪些事情很困難、讓人害怕或狀況不明確？", commonTags: ["#遇到阻礙 (Blocker)"] },
-      { name: "未知森林 (Forest)", icon: <MapPin className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-700", desc: "不要掉進去！我們需要停止做什麼事，或者有哪些未知的領域需要釐清？", commonTags: ["#潛在風險 (Risk)", "#遇到阻礙 (Stop)"] }
+      { name: "未知森林 (Forest)", icon: <MapPin className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-700", desc: "不要掉進去！我們需要停止做什麼事，或者有哪些未知的領域需要釐清？", commonTags: ["#潛在風險 (Risk)", "#需要改變 (Change)"] }
     ]
   },
   {
@@ -160,8 +163,8 @@ const patternsData = [
     scenario: "經歷了混亂、需求變動劇烈、或充滿驚險救火事件的 Sprint 後。",
     tags: ["情緒復盤", "高低潮檢視", "混亂後覆盤"],
     areas: [
-      { name: "高山 (Mountain)", icon: <Mountain className="w-6 h-6"/>, colorBg: "bg-sky-100 text-sky-600", desc: "像雲霄飛車一樣！分享 Sprint 中令人極度興奮、覺得特別有趣的事情。", commonTags: ["#值得慶祝 (Good)"] },
-      { name: "城堡 (Castle)", icon: <Building className="w-6 h-6"/>, colorBg: "bg-indigo-100 text-indigo-500", desc: "魔法時刻！那些令人難忘、充滿 Wow 驚嘆號、表現絕佳的不可思議時刻。", commonTags: ["#值得慶祝 (Good)"] },
+      { name: "高山 (Mountain)", icon: <Mountain className="w-6 h-6"/>, colorBg: "bg-sky-100 text-sky-600", desc: "像雲霄飛車一樣！分享 Sprint 中令人極度興奮、覺得特別有趣的事情。", commonTags: ["#值得分享 (Share)"] },
+      { name: "城堡 (Castle)", icon: <Building className="w-6 h-6"/>, colorBg: "bg-indigo-100 text-indigo-500", desc: "魔法時刻！那些令人難忘、充滿 Wow 驚嘆號、表現絕佳的不可思議時刻。", commonTags: ["#值得分享 (Share)"] },
       { name: "潛水艇 (Submarine)", icon: <Anchor className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-800", desc: "沉入水底。覺得沮喪、失敗、或者進行得很不順利、沉沒的任務。", commonTags: ["#遇到阻礙 (Blocker)"] },
       { name: "爆米花 (Popcorn)", icon: <Flame className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "補充樂園能量。哪些事情充滿活力、提供了養分，讓團隊充滿幹勁？", commonTags: ["#繼續保持 (Keep)"] },
       { name: "鬼屋 (Haunted House)", icon: <ShieldAlert className="w-6 h-6"/>, colorBg: "bg-slate-200 text-slate-800", desc: "嚇死人了！工作中有哪些部分很可怕、充滿危機、下次絕對要小心避開？", commonTags: ["#潛在風險 (Risk)"] }
@@ -180,8 +183,8 @@ const patternsData = [
     areas: [
       { name: "降落傘 (Parachute)", icon: <CloudRain className="w-6 h-6"/>, colorBg: "bg-slate-100 text-slate-500", desc: "阻力來源。是什麼拖慢了我們的開發速度？(例：無止盡的開會、環境設定)", commonTags: ["#遇到阻礙 (Blocker)"] },
       { name: "電動引擎 (Electric Vehicle)", icon: <Battery className="w-6 h-6"/>, colorBg: "bg-green-100 text-green-600", desc: "動力來源。什麼事情或工具為我們充電，推動我們高速往前衝？", commonTags: ["#繼續保持 (Keep)"] },
-      { name: "停止標誌 (Stop Sign)", icon: <Octagon className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "立刻煞車！我們必須馬上「停止做」的壞習慣或無效流程是什麼？", commonTags: ["#遇到阻礙 (Stop)"] },
-      { name: "終點線 (Finish Line)", icon: <Flag className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "衝線時刻！我們是如何受到激勵的？達到目標後我們該如何慶祝？", commonTags: ["#值得慶祝 (Good)", "#新嘗試 (Start)"] }
+      { name: "停止標誌 (Stop Sign)", icon: <Octagon className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "立刻煞車！我們必須馬上「停止做」的壞習慣或無效流程是什麼？", commonTags: ["#需要改變 (Change)"] },
+      { name: "終點線 (Finish Line)", icon: <Flag className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "衝線時刻！我們是如何受到激勵的？達到目標後我們該如何慶祝？", commonTags: ["#值得分享 (Share)", "#新嘗試 (Start)"] }
     ]
   },
   {
@@ -197,7 +200,7 @@ const patternsData = [
     areas: [
       { name: "專注 (Focus/Magnifying Glass)", icon: <Search className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "放大鏡檢視：我們在衝刺期間是否夠專注？接下來最需要聚焦在哪件事上？", commonTags: ["#新嘗試 (Start)", "#遇到阻礙 (Blocker)"] },
       { name: "開放 (Openness/Window)", icon: <Maximize className="w-6 h-6"/>, colorBg: "bg-sky-100 text-sky-500", desc: "打開天窗說亮話：有什麼事情擋住了視線？我們在資訊同步上夠透明嗎？", commonTags: ["#遇到阻礙 (Blocker)", "#潛在風險 (Risk)"] },
-      { name: "尊重 (Respect/Handshake)", icon: <HeartHandshake className="w-6 h-6"/>, colorBg: "bg-pink-100 text-pink-600", desc: "握手言和：不論成功或失敗，我們是否有尊重彼此的專業與付出？", commonTags: ["#值得慶祝 (Good)", "#繼續保持 (Keep)"] },
+      { name: "尊重 (Respect/Handshake)", icon: <HeartHandshake className="w-6 h-6"/>, colorBg: "bg-pink-100 text-pink-600", desc: "握手言和：不論成功或失敗，我們是否有尊重彼此的專業與付出？", commonTags: ["#值得分享 (Share)", "#繼續保持 (Keep)"] },
       { name: "勇氣 (Courage/Meeting)", icon: <MessageSquare className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-600", desc: "勇敢發聲：我們在哪裡表現出勇氣？又有哪裡因為不敢說真話而妥協了？", commonTags: ["#學習發現 (Learn)", "#新嘗試 (Start)"] },
       { name: "承諾 (Commitment/Goal)", icon: <Target className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "目標約定：我們對 Sprint 目標以及對團隊彼此的承諾，是否都有盡力達成？", commonTags: ["#繼續保持 (Keep)"] }
     ]
@@ -214,7 +217,7 @@ const patternsData = [
     tags: ["流程優化", "會議瘦身", "務實檢討"],
     areas: [
       { name: "Sprint 整體 (Sprint)", icon: <Activity className="w-6 h-6"/>, colorBg: "bg-blue-100 text-blue-600", desc: "宏觀來看，我們該如何改進，才能更穩定、一致地達成 Sprint 目標？", commonTags: ["#新嘗試 (Start)"] },
-      { name: "規劃會議 (Planning/Joggers)", icon: <Calendar className="w-6 h-6"/>, colorBg: "bg-indigo-100 text-indigo-600", desc: "起跑準備：我們怎麼把 Planning 開得更好，確保選入的工作最有價值？", commonTags: ["#新嘗試 (Start)", "#遇到阻礙 (Stop)"] },
+      { name: "規劃會議 (Planning/Joggers)", icon: <Calendar className="w-6 h-6"/>, colorBg: "bg-indigo-100 text-indigo-600", desc: "起跑準備：我們怎麼把 Planning 開得更好，確保選入的工作最有價值？", commonTags: ["#新嘗試 (Start)", "#需要改變 (Change)"] },
       { name: "每日站會 (Daily/Coffee)", icon: <Coffee className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-700", desc: "早晨咖啡：Daily 是否有效幫助我們同步阻礙？目前還有什麼沒講出來的 Blockers？", commonTags: ["#遇到阻礙 (Blocker)"] },
       { name: "展示會議 (Review/Parcel)", icon: <Package className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "交付包裹：如何讓 Review 變成真實獲取回饋的「工作會議」，而不是單向簡報？", commonTags: ["#新嘗試 (Start)", "#繼續保持 (Keep)"] },
       { name: "回顧會議 (Retro/Lightbulb)", icon: <Lightbulb className="w-6 h-6"/>, colorBg: "bg-yellow-100 text-yellow-600", desc: "燈泡亮起：我們自己這個 Retro 會議還能怎麼改善，讓團隊擁有更好的自我管理？", commonTags: ["#學習發現 (Learn)"] }
@@ -234,7 +237,7 @@ const patternsData = [
       { name: "發現痛點 (Problem)", icon: <AlertTriangle className="w-6 h-6"/>, colorBg: "bg-red-100 text-red-600", desc: "我們觀察到了什麼現象？(例：Code Review 總是拖到最後一天)", commonTags: ["#遇到阻礙 (Blocker)"] },
       { name: "提出假設 (Hypothesis)", icon: <Lightbulb className="w-6 h-6"/>, colorBg: "bg-amber-100 text-amber-500", desc: "為什麼會發生？我們猜測原因是什麼？(例：因為大家早上都在開會沒空看)", commonTags: ["#學習發現 (Learn)"] },
       { name: "設計實驗 (Experiment)", icon: <Beaker className="w-6 h-6"/>, colorBg: "bg-purple-100 text-purple-600", desc: "下個 Sprint 我們要「試著改變什麼作法」來解決它？(例：規定每天下午 2 點為 PR 時間)", commonTags: ["#新嘗試 (Start)"] },
-      { name: "驗證指標 (Metrics)", icon: <Target className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "我們怎麼知道實驗成功了沒？要看什麼數據？(例：PR 平均停留時間低於 24 小時)", commonTags: ["#繼續保持 (Keep)"] }
+      { name: "驗證指標 (Metrics)", icon: <Target className="w-6 h-6"/>, colorBg: "bg-emerald-100 text-emerald-600", desc: "我們怎麼知道實驗成功了沒？要看什麼數據？(例：PR 平均停留時間低於 24 小時)", commonTags: ["#學習發現 (Learn)"] }
     ]
   }
 ];
