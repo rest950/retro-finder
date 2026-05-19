@@ -1,6 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Tldraw, AssetRecordType, createShapeId, getHashForString, loadSnapshot } from 'tldraw';
 import 'tldraw/tldraw.css';
+import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
+import { useYjsStore } from './useYjsStore';
+
+const LIVEBLOCKS_PUBLIC_KEY = 'pk_dev_HmjiBrl82vKEdKeBNAcQ8qVW31S9_FwWiKPR9utJDEddbLpCp5_30GMjxHsGkmHA';
+
+function CollabTldraw({ onMount }) {
+  const storeWithStatus = useYjsStore();
+  return <Tldraw store={storeWithStatus} onMount={onMount} />;
+}
 import Anthropic from '@anthropic-ai/sdk';
 import {
   Rocket, Mountain, Ship, Sprout, Bug, HardHat,
@@ -330,6 +339,21 @@ export default function App() {
   const [recommendedIds, setRecommendedIds] = useState([]);
   const [selectedOptions, setSelectedOptions] = useState([]);
   const [selectedPattern, setSelectedPattern] = useState(null); // 新增：追蹤目前查看詳細內容的 pattern
+
+  // Collab room state
+  const [roomId, setRoomId] = useState(() => {
+    const m = window.location.hash.match(/^#collab-([0-9a-f-]+)$/);
+    return m ? m[1] : null;
+  });
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    if (view !== 'board') return;
+    if (roomId) return; // 保留已有的 roomId（來自分享連結）
+    const id = crypto.randomUUID();
+    setRoomId(id);
+    window.location.hash = `collab-${id}`;
+  }, [view]);
 
   // Bulk import state
   const [bulkText, setBulkText] = useState('');
@@ -677,7 +701,10 @@ export default function App() {
     editorRef.current = editor;
     if (sessionToRestore) {
       currentSessionIdRef.current = sessionToRestore.id;
-      loadSnapshot(editor.store, sessionToRestore.snapshot);
+      // 只在畫布為空時才載入快照，避免覆蓋其他人的共編內容
+      if (editor.getCurrentPageShapes().length === 0) {
+        loadSnapshot(editor.store, sessionToRestore.snapshot);
+      }
       setSessionToRestore(null);
     } else {
       currentSessionIdRef.current = crypto.randomUUID();
@@ -1408,8 +1435,22 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
                 )}
               </div>
 
-              <div className="p-3 border-t border-slate-100 flex-shrink-0 text-center">
-                <p className="text-xs text-slate-400">{savedMsg ? '✓ 已自動儲存' : '變更將自動儲存'}</p>
+              <div className="p-3 border-t border-slate-100 flex-shrink-0 space-y-2">
+                {roomId && (
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}${window.location.pathname}#collab-${roomId}`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2000);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 py-1.5 rounded-lg transition-colors border border-blue-200"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    {copiedLink ? '✓ 已複製連結' : '複製共享連結'}
+                  </button>
+                )}
+                <p className="text-xs text-slate-400 text-center">{savedMsg ? '✓ 已自動儲存' : '變更將自動儲存'}</p>
               </div>
             </>
           )}
@@ -1417,13 +1458,20 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
 
         {/* Whiteboard */}
         <div className="flex-1 relative">
-          <Tldraw onMount={handleBoardMount} />
+          {roomId ? (
+            <RoomProvider id={roomId} initialPresence={{}}>
+              <CollabTldraw onMount={handleBoardMount} />
+            </RoomProvider>
+          ) : (
+            <div className="tl-loading" aria-busy="true" />
+          )}
         </div>
       </div>
     );
   };
 
   return (
+    <LiveblocksProvider publicApiKey={LIVEBLOCKS_PUBLIC_KEY}>
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
@@ -1474,6 +1522,7 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
       )}
       {view === 'board' && renderBoard()}
     </div>
+    </LiveblocksProvider>
   );
 }
 

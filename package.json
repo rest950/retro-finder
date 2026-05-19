@@ -14,10 +14,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
+    "@liveblocks/client": "^3.19.1",
+    "@liveblocks/react": "^3.19.1",
+    "@liveblocks/yjs": "^3.19.1",
     "@tldraw/tldraw": "^5.0.1",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "yjs": "^13.6.30"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
