@@ -1484,7 +1484,6 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
               <Rocket className="w-5 h-5 text-white" />
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-800">RetroFinder</span>
-            <span className="text-xs text-slate-400 font-normal">v0.3.0</span>
           </div>
           <nav className="flex gap-4">
             <button
@@ -1519,6 +1518,7 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
           {view === 'detail' && renderDetail()}
           {view === 'history' && renderHistory()}
           {view === 'debrief' && renderDebrief()}
+          <footer className="text-center py-6 text-xs text-slate-400">v0.3.0</footer>
         </main>
       )}
       {view === 'board' && renderBoard()}
