@@ -1518,6 +1518,7 @@ ${unassigned.length > 0 ? `\n【未分類】\n${unassigned.map(n => `- ${n.text}
           {view === 'detail' && renderDetail()}
           {view === 'history' && renderHistory()}
           {view === 'debrief' && renderDebrief()}
+          <footer className="text-center py-4 text-xs text-slate-300">v0.3.0</footer>
         </main>
       )}
       {view === 'board' && renderBoard()}
